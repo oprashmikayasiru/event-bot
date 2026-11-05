@@ -42,6 +42,7 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
+// Sri Lanka Standard Time (+05:30) Formatter
 function getSLDateOnlyString(futureTimestamp) {
   const slOffset = 5.5 * 60 * 60 * 1000;
   const slDate = new Date(futureTimestamp + slOffset);
@@ -53,6 +54,7 @@ function getSLDateOnlyString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Auto-configure Scoped Commands
 let commandsConfigured = false;
 async function setupBotCommands() {
   if (commandsConfigured) return;
@@ -81,8 +83,7 @@ async function setupBotCommands() {
   }
 }
 
-// --- Leaderboard View Logic ---
-
+// Leaderboard View Function
 async function renderLeaderboardText(ctx) {
   try {
     const db = await getDb();
@@ -135,7 +136,7 @@ const leaderboardKeyboard = Markup.inlineKeyboard([
   [Markup.button.callback('🔄 Refresh', 'refresh_leaderboard')]
 ]);
 
-// --- User Handlers ---
+// --- User Handlers (/start & JOIN_EVENT) ---
 
 bot.start(async (ctx) => {
   if (!ctx.from) return;
@@ -151,7 +152,7 @@ bot.start(async (ctx) => {
       return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
-    // Auto-register user
+    // Auto-register user whenever they start
     if (cfg.reg_enabled) {
       await db.collection('event_users').updateOne(
         { _id: userId },
@@ -169,15 +170,17 @@ bot.start(async (ctx) => {
         },
         { upsert: true }
       );
+    } else if (payload === 'JOIN_EVENT') {
+      return ctx.reply('⚠️ Registration is currently closed!');
     }
 
-    // All Start Messages (Both direct /start and referral)
-    const msg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
+    // තනි සම්පූර්ණ සිංහල Message එක (ඕනෑම start එකකට එන්නේ මෙන්න මේකයි)
+    const welcomeMsg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
       `Videos unlock කරලා Points එකතු කරගන්න.\n` +
       `🔥 <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n` +
       `🎯 Target: <b>${cfg.target_points} Points</b>`;
 
-    return ctx.reply(msg, {
+    return ctx.reply(welcomeMsg, {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
@@ -438,6 +441,7 @@ async function handleClaim(reqBody) {
             { $set: { vip_claimed: true } }
           );
 
+          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
