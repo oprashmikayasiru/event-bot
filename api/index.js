@@ -7,7 +7,7 @@ const VIP_CHANNEL_ID = process.env.VIP_CHANNEL_ID || '-1004316350899';
 const ADMIN_ID = String(process.env.ADMIN_ID || '5411921025').trim();
 
 let cachedClient = null;
-async function getDb() {
+async function getDb() { 
   if (!cachedClient) {
     cachedClient = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
