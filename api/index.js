@@ -26,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null, // Format: YYYY-MM-DD
+      event_end_date: null,
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -42,7 +42,6 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
-// Sri Lanka Standard Time (+05:30) Formatter (YYYY-MM-DD)
 function getSLDateOnlyString(futureTimestamp) {
   const slOffset = 5.5 * 60 * 60 * 1000;
   const slDate = new Date(futureTimestamp + slOffset);
@@ -54,14 +53,13 @@ function getSLDateOnlyString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Auto-configure Scoped Commands
 let commandsConfigured = false;
 async function setupBotCommands() {
   if (commandsConfigured) return;
   try {
     await bot.telegram.setMyCommands(
       [
-        { command: 'start', description: 'Start bot & register' },
+        { command: 'start', description: 'Start bot & instructions' },
         { command: 'leaderboard', description: 'View leaderboard' }
       ],
       { scope: { type: 'default' } }
@@ -103,9 +101,9 @@ async function renderLeaderboardText(ctx) {
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
       if (u) {
-        text += `${badges[i]}  ${maskId(u._id)} : ⭐️ ${u.points} Pts\n`;
+        text += `${badges[i]}  ${maskId(u._id)} : ⚡️ ${u.points} XP\n`;
       } else {
-        text += `${badges[i]}  --- : ⭐️ 0 Pts\n`;
+        text += `${badges[i]}  --- : ⚡️ 0 XP\n`;
       }
     }
 
@@ -116,7 +114,7 @@ async function renderLeaderboardText(ctx) {
       const currentUser = await db.collection('event_users').findOne({ _id: userId });
       if (currentUser) {
         const higherCount = await db.collection('event_users').countDocuments({ points: { $gt: currentUser.points } });
-        text += `👤 You: ${maskId(userId)} | Rank #${higherCount + 1} (⭐️ ${currentUser.points} Pts)\n`;
+        text += `👤 You: ${maskId(userId)} | Rank #${higherCount + 1} (⚡️ ${currentUser.points} XP)\n`;
       } else {
         text += `👤 You: <i>Not registered yet</i>\n`;
       }
@@ -143,6 +141,7 @@ bot.start(async (ctx) => {
   if (!ctx.from) return;
   const payload = ctx.startPayload;
   const userId = ctx.from.id;
+  const fName = ctx.from.first_name || 'User';
 
   try {
     const db = await getDb();
@@ -153,48 +152,81 @@ bot.start(async (ctx) => {
       return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
-    if (payload === 'JOIN_EVENT') {
-      if (!cfg.reg_enabled) {
-        return ctx.reply('⚠️ Registration is currently closed!');
-      }
+    const existingUser = await db.collection('event_users').findOne({ _id: userId });
 
-      await db.collection('event_users').updateOne(
-        { _id: userId },
-        { 
-          $set: {
-            first_name: ctx.from.first_name || 'User',
-            username: ctx.from.username || null
-          },
-          $setOnInsert: { 
-            registered_at: new Date(),
-            points: 0,
-            claimed_files: [],
-            vip_claimed: false
-          }
-        },
-        { upsert: true }
-      );
+    const welcomeMsg = `👋 Welcome <b>${fName}</b> to <b>Hot Lanka Event Bot</b>!\n\n` +
+      `🎁 <b>VIP Giveaway Challenge!</b>\n` +
+      `Unlock videos to get XP. Target එක සම්පූර්ණ කරන <b>මුල් ${cfg.max_winners} දෙනාට Hot Lanka VIP එක Free</b> හිමිවේ!\n\n` +
+      `⚡️ <b>Rate:</b> 1 Video = 1 XP\n` +
+      `🎯 <b>Target:</b> <b>${cfg.target_points} XP</b>\n\n` +
+      (existingUser 
+        ? `✅ <i>ඔබ දැනටමත් Challenge එකට ලියාපදිංචි වී ඇත!</i>` 
+        : `Challenge එකට එකතු වෙන්න පහත <b>Join Event</b> බටන් එක ක්ලික් කරන්න:`);
 
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nUnlock videos to earn points. First <b>${cfg.max_winners} users</b> to reach the target win <b>Free VIP!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
-      return ctx.reply(msg, {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
-        ])
-      });
+    const buttons = [];
+    if (!existingUser) {
+      buttons.push([Markup.button.callback('🚀 Join Event', 'action_join_event')]);
     }
+    buttons.push([Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]);
 
-    return ctx.reply(
-      `👋 Welcome to VIP Event Bot!\n\nCheck your rank, target and points below:`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
-        ])
-      }
-    );
+    return ctx.reply(welcomeMsg, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard(buttons)
+    });
   } catch (err) {
     console.error('Start error:', err);
+  }
+});
+
+// Explicit Join Action Button
+bot.action('action_join_event', async (ctx) => {
+  if (!ctx.from) return;
+  const userId = ctx.from.id;
+
+  try {
+    const db = await getDb();
+    const cfg = await getEventConfig(db);
+
+    if (!cfg.reg_enabled) {
+      return ctx.answerCbQuery('⚠️ Registration is currently closed!', { show_alert: true });
+    }
+
+    const existingUser = await db.collection('event_users').findOne({ _id: userId });
+    if (existingUser) {
+      return ctx.answerCbQuery('ඔබ දැනටමත් ලියාපදිංචි වී ඇත!', { show_alert: true });
+    }
+
+    await db.collection('event_users').updateOne(
+      { _id: userId },
+      { 
+        $set: {
+          first_name: ctx.from.first_name || 'User',
+          username: ctx.from.username || null
+        },
+        $setOnInsert: { 
+          registered_at: new Date(),
+          points: 0,
+          claimed_files: [],
+          vip_claimed: false
+        }
+      },
+      { upsert: true }
+    );
+
+    await ctx.answerCbQuery('සාර්ථකව ලියාපදිංචි විය!');
+
+    const msg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
+      `ඔබ සාර්ථකව Event එකට ලියාපදිංචි විය! දැන් videos unlock කර <b>XP</b> එකතු කරගන්න.\n\n` +
+      `🎯 <b>Target:</b> <b>${cfg.target_points} XP</b>`;
+
+    return ctx.reply(msg, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🏆 Check Leader Board', 'view_leaderboard')]
+      ])
+    });
+  } catch (e) {
+    console.error('Join error:', e);
   }
 });
 
@@ -231,7 +263,7 @@ async function buildAdminPanel(db, cfg) {
   const text = `⚙️ <b>VIP Event Control Panel</b>\n\n` +
     `• Registration: ${cfg.reg_enabled ? '🟢 OPEN' : '🔴 CLOSED'}\n` +
     `• Event End Date: ${cfg.event_end_date || 'Not Set'}\n` +
-    `• Target Points: ${cfg.target_points}\n` +
+    `• Target Points: ${cfg.target_points} XP\n` +
     `• VIP Slots: ${cfg.claimed_winners} / ${cfg.max_winners} Claimed\n\n` +
     `👥 Registered Users: ${totalRegistered}\n` +
     `🔓 Total Unlocks: ${totalUnlocks}`;
@@ -332,10 +364,9 @@ bot.action('admin_set_target', async (ctx) => {
     { $set: { admin_state: 'awaiting_target' } }
   );
   await ctx.answerCbQuery();
-  return ctx.reply('Send target points number (e.g. 30).\n\nSend /cancel to abort.');
+  return ctx.reply('Send target XP number (e.g. 30).\n\nSend /cancel to abort.');
 });
 
-// 2-Step Confirmation Reset
 bot.action('admin_reset_confirm', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   await ctx.answerCbQuery();
@@ -391,7 +422,7 @@ bot.on('text', async (ctx) => {
       { _id: 'main_event' },
       { $set: { target_points: pts }, $unset: { admin_state: '' } }
     );
-    return ctx.reply(`✅ Target Points set to: ${pts}`);
+    return ctx.reply(`✅ Target Points set to: <b>${pts} XP</b>`, { parse_mode: 'HTML' });
   }
 });
 
@@ -405,7 +436,6 @@ async function handleClaim(reqBody) {
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
-    // End date validation (Active until 23:59:59 Sri Lanka Time of that date)
     if (cfg.event_end_date) {
       const endTimestamp = new Date(`${cfg.event_end_date}T23:59:59+05:30`).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -432,7 +462,6 @@ async function handleClaim(reqBody) {
     const updatedUser = updateRes.value || updateRes;
     if (!updatedUser) return { ok: false };
 
-    // Target reached & VIP link delivery
     if (updatedUser.points >= cfg.target_points && !updatedUser.vip_claimed) {
       if (cfg.claimed_winners < cfg.max_winners) {
         const confUpdate = await db.collection('event_config').findOneAndUpdate(
@@ -449,18 +478,15 @@ async function handleClaim(reqBody) {
             { $set: { vip_claimed: true } }
           );
 
-          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
             expire_date: expireDate
           });
 
-          // 1. Winner Message
           const winMsg = `🏆 <b>Congratulations!</b>\n\nYou are one of the first ${cfg.max_winners} winners to reach the target!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
-          // 2. Alert to Admin
           if (ADMIN_ID) {
             const uNameText = updatedUser.username ? `@${updatedUser.username}` : 'No username';
             const fNameText = updatedUser.first_name || 'User';
@@ -469,7 +495,7 @@ async function handleClaim(reqBody) {
               `• <b>Name:</b> ${fNameText}\n` +
               `• <b>Username:</b> ${uNameText}\n` +
               `• <b>User ID:</b> <code>${userId}</code>\n` +
-              `• <b>Points:</b> ${updatedUser.points}`;
+              `• <b>Points:</b> ${updatedUser.points} XP`;
 
             bot.telegram.sendMessage(ADMIN_ID, adminAlert, { parse_mode: 'HTML' }).catch(() => {});
           }
