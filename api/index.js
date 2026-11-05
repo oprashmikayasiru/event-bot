@@ -16,7 +16,7 @@ async function getDb() {
     });
     await cachedClient.connect();
   }
-  return cachedClient.db('file_store_bot');
+  return cachedClient.db('vip_event_bot');
 }
 
 async function getEventConfig(db) {
@@ -26,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null, // format: "YYYY-MM-DD HH:mm"
+      event_end_date: null, // Format: YYYY-MM-DD HH:mm
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -38,7 +38,7 @@ async function getEventConfig(db) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// --- User Commands ---
+// --- User Handlers ---
 
 bot.start(async (ctx) => {
   if (!ctx.from) return;
@@ -142,7 +142,7 @@ bot.action('view_leaderboard', async (ctx) => {
   return ctx.reply(text, { parse_mode: 'HTML' });
 });
 
-// --- Admin Dashboard ---
+// --- Admin Dashboard Handlers ---
 
 function buildAdminPanel(cfg, totalRegistered) {
   const text = `⚙️ <b>VIP Event Control Panel</b>\n\n` +
@@ -214,6 +214,7 @@ bot.action('admin_set_target', async (ctx) => {
   return ctx.reply('Send target points number (e.g. 30).\n\nSend /cancel to abort.');
 });
 
+// 2-Step Confirmation Reset
 bot.action('admin_reset_confirm', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   await ctx.answerCbQuery();
@@ -252,7 +253,7 @@ bot.command('cancel', async (ctx) => {
   const db = await getDb();
   await db.collection('event_config').updateOne(
     { _id: 'main_event' },
-    { $unset: { admin_state: "" } }
+    { $unset: { admin_state: '' } }
   );
   return ctx.reply('🚫 Operation cancelled.');
 });
@@ -266,23 +267,23 @@ bot.on('text', async (ctx) => {
     const val = ctx.message.text.trim();
     await db.collection('event_config').updateOne(
       { _id: 'main_event' },
-      { $set: { event_end_date: val }, $unset: { admin_state: "" } }
+      { $set: { event_end_date: val }, $unset: { admin_state: '' } }
     );
     return ctx.reply(`✅ Event End Date set to: ${val}`);
   }
 
   if (cfg.admin_state === 'awaiting_target') {
-    const pts = parseInt(ctx.message.text.trim());
+    const pts = parseInt(ctx.message.text.trim(), 10);
     if (isNaN(pts) || pts <= 0) return ctx.reply('❌ Invalid number.');
     await db.collection('event_config').updateOne(
       { _id: 'main_event' },
-      { $set: { target_points: pts }, $unset: { admin_state: "" } }
+      { $set: { target_points: pts }, $unset: { admin_state: '' } }
     );
     return ctx.reply(`✅ Target Points set to: ${pts}`);
   }
 });
 
-// --- Claim Processing Function (Called via File Bot Fetch) ---
+// --- Claim Verification Logic ---
 
 async function handleClaim(reqBody) {
   try {
@@ -292,7 +293,7 @@ async function handleClaim(reqBody) {
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
-    // End date check
+    // End date validation
     if (cfg.event_end_date) {
       const endTimestamp = new Date(cfg.event_end_date).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -300,16 +301,16 @@ async function handleClaim(reqBody) {
       }
     }
 
-    // Check if registered
+    // Registered user check
     const user = await db.collection('event_users').findOne({ _id: Number(userId) });
     if (!user) return { ok: false, reason: 'not_registered' };
 
-    // Anti-cheat: Check if file already claimed
+    // Anti-cheat: Check if fileKey already unlocked
     if (user.claimed_files && user.claimed_files.includes(String(fileKey))) {
       return { ok: false, reason: 'already_claimed' };
     }
 
-    // Atomic increment
+    // Atomic update points & claimed_files
     const updateRes = await db.collection('event_users').findOneAndUpdate(
       { _id: Number(userId), claimed_files: { $ne: String(fileKey) } },
       { 
@@ -322,10 +323,9 @@ async function handleClaim(reqBody) {
     const updatedUser = updateRes.value || updateRes;
     if (!updatedUser) return { ok: false };
 
-    // Winner check
+    // Target reached & VIP generation check
     if (updatedUser.points >= cfg.target_points && !updatedUser.vip_claimed) {
       if (cfg.claimed_winners < cfg.max_winners) {
-        // Reserve slot
         const confUpdate = await db.collection('event_config').findOneAndUpdate(
           { _id: 'main_event', claimed_winners: { $lt: cfg.max_winners } },
           { $inc: { claimed_winners: 1 } },
@@ -338,7 +338,7 @@ async function handleClaim(reqBody) {
             { $set: { vip_claimed: true } }
           );
 
-          // Generate 24h 1-person link
+          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
@@ -355,22 +355,20 @@ async function handleClaim(reqBody) {
 
     return { ok: true };
   } catch (err) {
-    console.error('Claim processing error:', err.message);
+    console.error('Claim error:', err.message);
     return { ok: false, error: err.message };
   }
 }
 
-// --- Vercel Serverless Handler ---
+// --- Vercel Serverless Entry Point ---
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
-    // Check if it's internal fetch from File Bot
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
       const result = await handleClaim(req.body);
       return res.status(200).json(result);
     }
 
-    // Telegram Bot Webhook
     try {
       if (req.body && typeof req.body === 'object') {
         await bot.handleUpdate(req.body);
