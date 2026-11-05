@@ -42,7 +42,50 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
+// Sri Lanka Standard Time (+05:30) Formatter
+function getSLDateString(futureTimestamp) {
+  const slOffset = 5.5 * 60 * 60 * 1000;
+  const slDate = new Date(futureTimestamp + slOffset);
+  const y = slDate.getUTCFullYear();
+  const m = String(slDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(slDate.getUTCDate()).padStart(2, '0');
+  const hh = String(slDate.getUTCHours()).padStart(2, '0');
+  const mm = String(slDate.getUTCMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
 const bot = new Telegraf(BOT_TOKEN);
+
+// Auto-configure Scoped Commands (Admin vs Users)
+let commandsConfigured = false;
+async function setupBotCommands() {
+  if (commandsConfigured) return;
+  try {
+    // Public commands for all users
+    await bot.telegram.setMyCommands(
+      [
+        { command: 'start', description: 'Start bot & register' },
+        { command: 'leaderboard', description: 'View top ranks & points' }
+      ],
+      { scope: { type: 'default' } }
+    );
+
+    // Private command menu for Admin only
+    if (ADMIN_ID) {
+      await bot.telegram.setMyCommands(
+        [
+          { command: 'start', description: 'Start bot' },
+          { command: 'leaderboard', description: 'View leaderboard' },
+          { command: 'admin', description: 'Open Control Dashboard' }
+        ],
+        { scope: { type: 'chat', chat_id: Number(ADMIN_ID) } }
+      );
+    }
+    commandsConfigured = true;
+  } catch (e) {
+    console.error('Scoped commands setup error:', e.message);
+  }
+}
 
 // --- User Handlers ---
 
@@ -102,14 +145,15 @@ async function renderLeaderboard(ctx) {
       .toArray();
 
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
-    const badges = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    // Medals matching for all 5 spots (🥇, 🥈, 🥉, 🏅, 🎖️)
+    const badges = ['🥇', '🥈', '🥉', '🏅', '🎖️'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
       if (u) {
-        text += `${badges[i]}  <code>${maskId(u._id)}</code>  ➔  ⭐️ <b>${u.points} Pts</b>\n\n`;
+        text += `${badges[i]} <code>${maskId(u._id)}</code> ➔ ⭐️ ${u.points} Pts\n`;
       } else {
-        text += `${badges[i]}  <code>---</code>  ➔  ⭐️ 0 Pts\n\n`;
+        text += `${badges[i]} <code>---</code> ➔ ⭐️ 0 Pts\n`;
       }
     }
 
@@ -127,7 +171,7 @@ async function renderLeaderboard(ctx) {
     }
 
     if (cfg.event_end_date) {
-      text += `\n⏳ <b>Event Ends:</b> <code>${cfg.event_end_date}</code>`;
+      text += `⏳ Ends: <code>${cfg.event_end_date}</code>`;
     }
 
     return text;
@@ -198,11 +242,13 @@ bot.action('toggle_reg', async (ctx) => {
   return ctx.editMessageText(text, { parse_mode: 'HTML', ...keyboard });
 });
 
-// Quick Date Selector Buttons
+// Duration Selector with Sri Lanka Time Calculation
 bot.action('admin_pick_date', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
+  const db = await getDb();
+  const cfg = await getEventConfig(db);
   await ctx.answerCbQuery();
-  return ctx.reply('⏱️ <b>Select Event Duration:</b>', {
+  return ctx.reply(`⏱️ <b>Select Event Duration:</b>\n\n📌 <b>Current End Date:</b> <code>${cfg.event_end_date || 'Not Set'}</code>`, {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
       [
@@ -213,24 +259,34 @@ bot.action('admin_pick_date', async (ctx) => {
         Markup.button.callback('+30 Days', 'set_days_30'),
         Markup.button.callback('❌ Clear Date', 'set_days_clear')
       ],
+      [
+        Markup.button.callback('ℹ️ Check Current End Date', 'check_current_date')
+      ],
       [Markup.button.callback('🔙 Back to Panel', 'admin_back_to_panel')]
     ])
   });
+});
+
+bot.action('check_current_date', async (ctx) => {
+  if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
+  const db = await getDb();
+  const cfg = await getEventConfig(db);
+  return ctx.answerCbQuery(`End Date: ${cfg.event_end_date || 'Not Set'}`, { show_alert: true });
 });
 
 async function applyDays(ctx, days) {
   const db = await getDb();
   let dateStr = null;
   if (days > 0) {
-    const target = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-    dateStr = target.toISOString().replace('T', ' ').slice(0, 16);
+    const futureTimestamp = Date.now() + (days * 24 * 60 * 60 * 1000);
+    dateStr = getSLDateString(futureTimestamp);
   }
   await db.collection('event_config').updateOne(
     { _id: 'main_event' },
     { $set: { event_end_date: dateStr } }
   );
   await ctx.answerCbQuery('Date Updated!');
-  return ctx.reply(`✅ Event End Date set to: <code>${dateStr || 'Cleared'}</code>`, { parse_mode: 'HTML' });
+  return ctx.reply(`✅ Event End Date set to: <code>${dateStr || 'Cleared'}</code> (Sri Lanka Time)`, { parse_mode: 'HTML' });
 }
 
 bot.action('set_days_7', (ctx) => applyDays(ctx, 7));
@@ -330,7 +386,8 @@ async function handleClaim(reqBody) {
     const cfg = await getEventConfig(db);
 
     if (cfg.event_end_date) {
-      const endTimestamp = new Date(cfg.event_end_date).getTime();
+      // Compare in Sri Lanka timestamp
+      const endTimestamp = new Date(cfg.event_end_date.replace(' ', 'T') + ':00+05:30').getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
         return { ok: false, reason: 'event_ended' };
       }
@@ -390,10 +447,13 @@ async function handleClaim(reqBody) {
   }
 }
 
-// --- Vercel Serverless Function ---
+// --- Vercel Serverless Entry Point ---
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
+    // Setup Scoped Commands on background execution
+    setupBotCommands().catch(() => {});
+
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
       const result = await handleClaim(req.body);
       return res.status(200).json(result);
