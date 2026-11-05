@@ -98,7 +98,7 @@ async function renderLeaderboardText(ctx) {
       .toArray();
 
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
-    const badges = ['🥇', '🥈', '🥉', '🏅', '🎖️'];
+    const badges = ['❶', '❷', '❸', '❹', '❺'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
