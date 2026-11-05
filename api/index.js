@@ -1,4 +1,4 @@
-const { Telegraf, Markup } = require('telegraf'); 
+const { Telegraf, Markup } = require('telegraf');
 const { MongoClient } = require('mongodb');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '9219700583:AAGSAXsd3g34KHI0fTYoJzCbfiv2mlLCJ48';
@@ -7,7 +7,7 @@ const VIP_CHANNEL_ID = process.env.VIP_CHANNEL_ID || '-1004316350899';
 const ADMIN_ID = String(process.env.ADMIN_ID || '5411921025').trim();
 
 let cachedClient = null;
-async function getDb() { 
+async function getDb() {
   if (!cachedClient) {
     cachedClient = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
@@ -175,7 +175,7 @@ bot.start(async (ctx) => {
         { upsert: true }
       );
 
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points එකතු කරගන්න. <b>Target එක සම්පූර්ණ කරන පලවෙනි ${cfg.max_winners} දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
+      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nUnlock videos to earn points. First <b>${cfg.max_winners} users</b> to reach the target win <b>Free VIP!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
       return ctx.reply(msg, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -456,9 +456,8 @@ async function handleClaim(reqBody) {
             expire_date: expireDate
           });
 
-          // 1. Winner Message with dynamic First Name
-          const firstName = updatedUser.first_name || 'User';
-          const winMsg = `🏆 <b>Congratulations!</b>\n\n${firstName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
+          // 1. Winner Message
+          const winMsg = `🏆 <b>Congratulations!</b>\n\nYou are one of the first ${cfg.max_winners} winners to reach the target!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
           // 2. Alert to Admin
