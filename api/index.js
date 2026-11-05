@@ -56,7 +56,7 @@ function getSLDateString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Auto-configure Scoped Commands
+// Auto-configure Scoped Commands (Admin vs Users)
 let commandsConfigured = false;
 async function setupBotCommands() {
   if (commandsConfigured) return;
@@ -85,55 +85,7 @@ async function setupBotCommands() {
   }
 }
 
-// --- User Handlers ---
-
-bot.start(async (ctx) => {
-  if (!ctx.from) return;
-  const payload = ctx.startPayload;
-  const userId = ctx.from.id;
-
-  try {
-    const db = await getDb();
-    const cfg = await getEventConfig(db);
-
-    if (payload === 'JOIN_EVENT') {
-      if (!cfg.reg_enabled) {
-        return ctx.reply('⚠️ Registration is currently closed!');
-      }
-
-      await db.collection('event_users').updateOne(
-        { _id: userId },
-        { 
-          $setOnInsert: { 
-            registered_at: new Date(),
-            points: 0,
-            claimed_files: [],
-            vip_claimed: false,
-            first_name: ctx.from.first_name || 'User'
-          }
-        },
-        { upsert: true }
-      );
-
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points එකතු කරගන්න. මුලින්ම Target එක ගහන <b>පළමු ${cfg.max_winners} දෙනාට VIP Free!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
-      return ctx.reply(msg, {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
-        ])
-      });
-    }
-
-    const botUsername = ctx.botInfo.username;
-    return ctx.reply(`👋 Welcome to VIP Event Bot!\n\nUse <a href="https://t.me/${botUsername}?start=leaderboard">Leader Board</a> to check your rank and points.`, {
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    });
-  } catch (err) {
-    console.error('Start error:', err);
-  }
-});
-
+// Leaderboard Render Logic
 async function renderLeaderboard(ctx) {
   try {
     const db = await getDb();
@@ -146,7 +98,7 @@ async function renderLeaderboard(ctx) {
       .limit(5)
       .toArray();
 
-    // Calculate Total Unlocks (Total Posts Claimed)
+    // Total Unlocks (Sum of all points earned)
     const totalStats = await db.collection('event_users').aggregate([
       { $group: { _id: null, totalPoints: { $sum: "$points" } } }
     ]).toArray();
@@ -189,6 +141,69 @@ async function renderLeaderboard(ctx) {
   }
 }
 
+// --- User Handlers ---
+
+bot.start(async (ctx) => {
+  if (!ctx.from) return;
+  const payload = ctx.startPayload;
+  const userId = ctx.from.id;
+
+  try {
+    const db = await getDb();
+    const cfg = await getEventConfig(db);
+
+    // ලින්ක් එකෙන් හෝ start parameter එකෙන් leaderboard එක ඉල්ලුවොත්
+    if (payload === 'leaderboard') {
+      const text = await renderLeaderboard(ctx);
+      return ctx.reply(text, { parse_mode: 'HTML' });
+    }
+
+    // Join Event ලින්ක් එකෙන් ආවොත්
+    if (payload === 'JOIN_EVENT') {
+      if (!cfg.reg_enabled) {
+        return ctx.reply('⚠️ Registration is currently closed!');
+      }
+
+      await db.collection('event_users').updateOne(
+        { _id: userId },
+        { 
+          $setOnInsert: { 
+            registered_at: new Date(),
+            points: 0,
+            claimed_files: [],
+            vip_claimed: false,
+            first_name: ctx.from.first_name || 'User'
+          }
+        },
+        { upsert: true }
+      );
+
+      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points එකතු කරගන්න. මුලින්ම Target එක ගහන <b>පළමු ${cfg.max_winners} දෙනාට VIP Free!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
+      return ctx.reply(msg, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
+        ])
+      });
+    }
+
+    // සාමාන්‍ය Start එක
+    const botUsername = ctx.botInfo.username;
+    return ctx.reply(
+      `👋 Welcome to VIP Event Bot!\n\nUse <a href="https://t.me/${botUsername}?start=leaderboard">Leader Board</a> to check your rank and points.`,
+      {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
+        ])
+      }
+    );
+  } catch (err) {
+    console.error('Start error:', err);
+  }
+});
+
 bot.command('leaderboard', async (ctx) => {
   const text = await renderLeaderboard(ctx);
   return ctx.reply(text, { parse_mode: 'HTML' });
@@ -200,7 +215,7 @@ bot.action('view_leaderboard', async (ctx) => {
   return ctx.reply(text, { parse_mode: 'HTML' });
 });
 
-// --- Admin Dashboard ---
+// --- Admin Dashboard Handlers ---
 
 async function buildAdminPanel(db, cfg) {
   const totalRegistered = await db.collection('event_users').countDocuments();
@@ -255,7 +270,6 @@ bot.action('toggle_reg', async (ctx) => {
   return ctx.editMessageText(text, { parse_mode: 'HTML', ...keyboard });
 });
 
-// Quick Duration Selector Buttons
 bot.action('admin_pick_date', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   const db = await getDb();
