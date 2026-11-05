@@ -26,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null,
+      event_end_date: null, // Format: YYYY-MM-DD
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -42,7 +42,7 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
-// Sri Lanka Standard Time (+05:30) Formatter
+// Sri Lanka Standard Time (+05:30) Formatter (YYYY-MM-DD)
 function getSLDateOnlyString(futureTimestamp) {
   const slOffset = 5.5 * 60 * 60 * 1000;
   const slDate = new Date(futureTimestamp + slOffset);
@@ -83,7 +83,8 @@ async function setupBotCommands() {
   }
 }
 
-// Leaderboard View Function
+// --- Leaderboard View Logic ---
+
 async function renderLeaderboardText(ctx) {
   try {
     const db = await getDb();
@@ -136,7 +137,7 @@ const leaderboardKeyboard = Markup.inlineKeyboard([
   [Markup.button.callback('🔄 Refresh', 'refresh_leaderboard')]
 ]);
 
-// --- User Handlers (/start & JOIN_EVENT) ---
+// --- User Handlers ---
 
 bot.start(async (ctx) => {
   if (!ctx.from) return;
@@ -152,8 +153,11 @@ bot.start(async (ctx) => {
       return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
-    // Auto-register user whenever they start
-    if (cfg.reg_enabled) {
+    if (payload === 'JOIN_EVENT') {
+      if (!cfg.reg_enabled) {
+        return ctx.reply('⚠️ Registration is currently closed!');
+      }
+
       await db.collection('event_users').updateOne(
         { _id: userId },
         { 
@@ -170,22 +174,25 @@ bot.start(async (ctx) => {
         },
         { upsert: true }
       );
-    } else if (payload === 'JOIN_EVENT') {
-      return ctx.reply('⚠️ Registration is currently closed!');
+
+      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points එකතු කරගන්න. <b>Target එක සම්පූර්ණ කරන පලවෙනි ${cfg.max_winners} දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
+      return ctx.reply(msg, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
+        ])
+      });
     }
 
-    // තනි සම්පූර්ණ සිංහල Message එක (ඕනෑම start එකකට එන්නේ මෙන්න මේකයි)
-    const welcomeMsg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
-      `Videos unlock කරලා Points එකතු කරගන්න.\n` +
-      `🔥 <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n` +
-      `🎯 Target: <b>${cfg.target_points} Points</b>`;
-
-    return ctx.reply(welcomeMsg, {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
-      ])
-    });
+    return ctx.reply(
+      `👋 Welcome to VIP Event Bot!\n\nCheck your rank, target and points below:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
+        ])
+      }
+    );
   } catch (err) {
     console.error('Start error:', err);
   }
@@ -398,6 +405,7 @@ async function handleClaim(reqBody) {
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
+    // End date validation (Active until 23:59:59 Sri Lanka Time of that date)
     if (cfg.event_end_date) {
       const endTimestamp = new Date(`${cfg.event_end_date}T23:59:59+05:30`).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -448,9 +456,9 @@ async function handleClaim(reqBody) {
             expire_date: expireDate
           });
 
-          // 1. Winner Message
-          const winnerName = updatedUser.first_name || 'User';
-          const winMsg = `🏆 <b>Congratulations!</b>\n\n${winnerName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
+          // 1. Winner Message with dynamic First Name
+          const firstName = updatedUser.first_name || 'User';
+          const winMsg = `🏆 <b>Congratulations!</b>\n\n${firstName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
           // 2. Alert to Admin
