@@ -5,7 +5,6 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '9219700583:AAGSAXsd3g34KHI0fTYoJzCbf
 const MONGODB_URI = process.env.MONGODB_URI;
 const VIP_CHANNEL_ID = process.env.VIP_CHANNEL_ID || '-1004316350899';
 const ADMIN_ID = String(process.env.ADMIN_ID || '5411921025').trim();
-const SYNC_SECRET = process.env.SYNC_SECRET || 'hl_vip_secure_secret_key_9921';
 
 let cachedClient = null;
 async function getDb() {
@@ -27,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null,
+      event_end_date: null, // Format: YYYY-MM-DD
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -43,7 +42,7 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
-// Sri Lanka Standard Time (+05:30) Formatter
+// Sri Lanka Standard Time (+05:30) Formatter (YYYY-MM-DD)
 function getSLDateOnlyString(futureTimestamp) {
   const slOffset = 5.5 * 60 * 60 * 1000;
   const slDate = new Date(futureTimestamp + slOffset);
@@ -158,13 +157,15 @@ bot.start(async (ctx) => {
       await db.collection('event_users').updateOne(
         { _id: userId },
         { 
+          $set: {
+            first_name: ctx.from.first_name || 'User',
+            username: ctx.from.username || null
+          },
           $setOnInsert: { 
             registered_at: new Date(),
             points: 0,
             claimed_files: [],
-            vip_claimed: false,
-            first_name: ctx.from.first_name || 'User',
-            username: ctx.from.username || null
+            vip_claimed: false
           }
         },
         { upsert: true }
@@ -179,12 +180,10 @@ bot.start(async (ctx) => {
       });
     }
 
-    const botUsername = ctx.botInfo.username;
     return ctx.reply(
       `👋 Welcome to VIP Event Bot!\n\nCheck your rank, target and points below:`,
       {
         parse_mode: 'HTML',
-        disable_web_page_preview: true,
         ...Markup.inlineKeyboard([
           [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
         ])
@@ -377,23 +376,17 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// --- Claim Handler (Secure & Admin Notified) ---
+// --- Claim Handler (From File Bot) ---
 
-async function handleClaim(reqBody, headers) {
+async function handleClaim(reqBody) {
   try {
-    // 1. Anti-Cheat: Validate Secret Key from File Bot
-    const clientSecret = headers['x-event-secret'] || headers['X-Event-Secret'];
-    if (clientSecret !== SYNC_SECRET) {
-      return { ok: false, error: 'unauthorized_request' };
-    }
-
-    const { userId, fileKey, firstName, username } = reqBody;
+    const { userId, fileKey } = reqBody;
     if (!userId || !fileKey) return { ok: false, reason: 'missing_params' };
 
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
-    // End date validation (Active until 23:59:59 Sri Lanka Time)
+    // End date validation (Active until 23:59:59 Sri Lanka Time of that date)
     if (cfg.event_end_date) {
       const endTimestamp = new Date(`${cfg.event_end_date}T23:59:59+05:30`).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -404,21 +397,15 @@ async function handleClaim(reqBody, headers) {
     const user = await db.collection('event_users').findOne({ _id: Number(userId) });
     if (!user) return { ok: false, reason: 'not_registered' };
 
-    // Anti-duplicate check
     if (user.claimed_files && user.claimed_files.includes(String(fileKey))) {
       return { ok: false, reason: 'already_claimed' };
     }
 
-    // Atomic update
     const updateRes = await db.collection('event_users').findOneAndUpdate(
       { _id: Number(userId), claimed_files: { $ne: String(fileKey) } },
       { 
         $push: { claimed_files: String(fileKey) },
-        $inc: { points: 1 },
-        $set: {
-          first_name: firstName || user.first_name || 'User',
-          username: username || user.username || null
-        }
+        $inc: { points: 1 }
       },
       { returnDocument: 'after' }
     );
@@ -426,7 +413,7 @@ async function handleClaim(reqBody, headers) {
     const updatedUser = updateRes.value || updateRes;
     if (!updatedUser) return { ok: false };
 
-    // Target Reached & VIP link delivery
+    // Target reached & VIP link delivery
     if (updatedUser.points >= cfg.target_points && !updatedUser.vip_claimed) {
       if (cfg.claimed_winners < cfg.max_winners) {
         const confUpdate = await db.collection('event_config').findOneAndUpdate(
@@ -435,36 +422,37 @@ async function handleClaim(reqBody, headers) {
           { returnDocument: 'after' }
         );
 
+        const currentSlot = (confUpdate.value || confUpdate).claimed_winners;
+
         if (confUpdate.value || confUpdate) {
           await db.collection('event_users').updateOne(
             { _id: Number(userId) },
             { $set: { vip_claimed: true } }
           );
 
-          // Generate 24h single-use VIP link
+          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
             expire_date: expireDate
           });
 
-          // 1. Send Link to Winner
+          // 1. Message to the Winner
           const winMsg = `🏆 <b>Congratulations!</b>\n\nYou are one of the first ${cfg.max_winners} winners to reach the target!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
-          // 2. Alert Admin Instantly
+          // 2. Alert to Admin
           if (ADMIN_ID) {
-            const uName = updatedUser.username ? `@${updatedUser.username}` : 'None';
-            const fName = updatedUser.first_name || 'User';
-            const adminAlert = `🎉 <b>New VIP Winner!</b>\n\n` +
-              `• <b>Winner:</b> #${cfg.claimed_winners + 1} of ${cfg.max_winners}\n` +
-              `• <b>Name:</b> ${fName}\n` +
-              `• <b>Username:</b> ${uName}\n` +
+            const uNameText = updatedUser.username ? `@${updatedUser.username}` : 'No username';
+            const fNameText = updatedUser.first_name || 'User';
+            const adminAlert = `🚨 <b>New VIP Winner Claimed!</b>\n\n` +
+              `• <b>Slot:</b> ${currentSlot} / ${cfg.max_winners}\n` +
+              `• <b>Name:</b> ${fNameText}\n` +
+              `• <b>Username:</b> ${uNameText}\n` +
               `• <b>User ID:</b> <code>${userId}</code>\n` +
-              `• <b>Points:</b> ${updatedUser.points}\n\n` +
-              `🔗 <b>Generated Link:</b>\n${invite.invite_link}`;
-            
-            await bot.telegram.sendMessage(ADMIN_ID, adminAlert, { parse_mode: 'HTML' }).catch(() => {});
+              `• <b>Points:</b> ${updatedUser.points}`;
+
+            bot.telegram.sendMessage(ADMIN_ID, adminAlert, { parse_mode: 'HTML' }).catch(() => {});
           }
         }
       } else {
@@ -486,7 +474,7 @@ module.exports = async (req, res) => {
     setupBotCommands().catch(() => {});
 
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
-      const result = await handleClaim(req.body, req.headers);
+      const result = await handleClaim(req.body);
       return res.status(200).json(result);
     }
 
