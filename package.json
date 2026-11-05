@@ -1,0 +1,13 @@
+{
+  "name": "eventbot",
+  "version": "1.0.0",
+  "description": "Telegram VIP Event Campaign Bot",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.8.0",
+    "telegraf": "^4.16.3"
+  }
+}
