@@ -153,11 +153,8 @@ bot.start(async (ctx) => {
       return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
-    if (payload === 'JOIN_EVENT') {
-      if (!cfg.reg_enabled) {
-        return ctx.reply('⚠️ Registration is currently closed!');
-      }
-
+    // Auto register on any /start or JOIN_EVENT
+    if (cfg.reg_enabled) {
       await db.collection('event_users').updateOne(
         { _id: userId },
         { 
@@ -174,25 +171,21 @@ bot.start(async (ctx) => {
         },
         { upsert: true }
       );
-
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nUnlock videos to earn points. <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
-      return ctx.reply(msg, {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
-        ])
-      });
     }
 
-    return ctx.reply(
-      `👋 Welcome to VIP Event Bot!\n\nCheck your rank, target and points below:`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
-        ])
-      }
-    );
+    // Main Start Message with the Sinhala Text
+    const startMsg = `👋 <b>Welcome to VIP Event Bot!</b>\n\n` +
+      `Videos unlock කරලා Points එකතු කරගන්න.\n` +
+      `🔥 <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n` +
+      `🎯 Target: <b>${cfg.target_points} Points</b>\n` +
+      `📌 පහළින් Leader Board එක බලාගන්න:`;
+
+    return ctx.reply(startMsg, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
+      ])
+    });
   } catch (err) {
     console.error('Start error:', err);
   }
@@ -456,7 +449,7 @@ async function handleClaim(reqBody) {
             expire_date: expireDate
           });
 
-          // 1. Winner Message
+          // 1. Winner Message (Personalized)
           const winnerName = updatedUser.first_name || 'User';
           const winMsg = `🏆 <b>Congratulations!</b>\n\n${winnerName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
