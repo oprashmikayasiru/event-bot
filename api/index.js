@@ -83,9 +83,9 @@ async function setupBotCommands() {
   }
 }
 
-// --- Leaderboard View ---
+// --- Leaderboard View Logic ---
 
-async function renderLeaderboard(ctx) {
+async function renderLeaderboardText(ctx) {
   try {
     const db = await getDb();
     const cfg = await getEventConfig(db);
@@ -133,6 +133,10 @@ async function renderLeaderboard(ctx) {
   }
 }
 
+const leaderboardKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback('🔄 Refresh', 'refresh_leaderboard')]
+]);
+
 // --- User Handlers ---
 
 bot.start(async (ctx) => {
@@ -145,8 +149,8 @@ bot.start(async (ctx) => {
     const cfg = await getEventConfig(db);
 
     if (payload === 'leaderboard') {
-      const text = await renderLeaderboard(ctx);
-      return ctx.reply(text, { parse_mode: 'HTML' });
+      const text = await renderLeaderboardText(ctx);
+      return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
     if (payload === 'JOIN_EVENT') {
@@ -195,27 +199,42 @@ bot.start(async (ctx) => {
 });
 
 bot.command('leaderboard', async (ctx) => {
-  const text = await renderLeaderboard(ctx);
-  return ctx.reply(text, { parse_mode: 'HTML' });
+  const text = await renderLeaderboardText(ctx);
+  return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
 });
 
 bot.action('view_leaderboard', async (ctx) => {
   await ctx.answerCbQuery();
-  const text = await renderLeaderboard(ctx);
-  return ctx.reply(text, { parse_mode: 'HTML' });
+  const text = await renderLeaderboardText(ctx);
+  return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
+});
+
+bot.action('refresh_leaderboard', async (ctx) => {
+  try {
+    const text = await renderLeaderboardText(ctx);
+    await ctx.editMessageText(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
+    return ctx.answerCbQuery('Updated!');
+  } catch (e) {
+    return ctx.answerCbQuery();
+  }
 });
 
 // --- Admin Dashboard Handlers ---
 
 async function buildAdminPanel(db, cfg) {
   const totalRegistered = await db.collection('event_users').countDocuments();
+  const totalStats = await db.collection('event_users').aggregate([
+    { $group: { _id: null, totalPoints: { $sum: "$points" } } }
+  ]).toArray();
+  const totalUnlocks = totalStats.length > 0 ? totalStats[0].totalPoints : 0;
 
   const text = `⚙️ <b>VIP Event Control Panel</b>\n\n` +
     `• Registration: ${cfg.reg_enabled ? '🟢 OPEN' : '🔴 CLOSED'}\n` +
     `• Event End Date: ${cfg.event_end_date || 'Not Set'}\n` +
     `• Target Points: ${cfg.target_points}\n` +
     `• VIP Slots: ${cfg.claimed_winners} / ${cfg.max_winners} Claimed\n\n` +
-    `👥 Registered Users: ${totalRegistered}`;
+    `👥 Registered Users: ${totalRegistered}\n` +
+    `🔓 Total Unlocks: ${totalUnlocks}`;
 
   const keyboard = Markup.inlineKeyboard([
     [
@@ -437,7 +456,7 @@ async function handleClaim(reqBody) {
             expire_date: expireDate
           });
 
-          // 1. Message to the Winner
+          // 1. Winner Message
           const winMsg = `🏆 <b>Congratulations!</b>\n\nYou are one of the first ${cfg.max_winners} winners to reach the target!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
