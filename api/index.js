@@ -26,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null, // Format: YYYY-MM-DD
+      event_end_date: null,
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -42,7 +42,6 @@ function maskId(id) {
   return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
-// Sri Lanka Standard Time (+05:30) Formatter (YYYY-MM-DD)
 function getSLDateOnlyString(futureTimestamp) {
   const slOffset = 5.5 * 60 * 60 * 1000;
   const slDate = new Date(futureTimestamp + slOffset);
@@ -54,7 +53,6 @@ function getSLDateOnlyString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Auto-configure Scoped Commands
 let commandsConfigured = false;
 async function setupBotCommands() {
   if (commandsConfigured) return;
@@ -153,7 +151,7 @@ bot.start(async (ctx) => {
       return ctx.reply(text, { parse_mode: 'HTML', ...leaderboardKeyboard });
     }
 
-    // Auto register on any /start or JOIN_EVENT
+    // Auto-register user
     if (cfg.reg_enabled) {
       await db.collection('event_users').updateOne(
         { _id: userId },
@@ -173,14 +171,13 @@ bot.start(async (ctx) => {
       );
     }
 
-    // Main Start Message with the Sinhala Text
-    const startMsg = `👋 <b>Welcome to VIP Event Bot!</b>\n\n` +
+    // All Start Messages (Both direct /start and referral)
+    const msg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
       `Videos unlock කරලා Points එකතු කරගන්න.\n` +
       `🔥 <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n` +
-      `🎯 Target: <b>${cfg.target_points} Points</b>\n` +
-      `📌 පහළින් Leader Board එක බලාගන්න:`;
+      `🎯 Target: <b>${cfg.target_points} Points</b>`;
 
-    return ctx.reply(startMsg, {
+    return ctx.reply(msg, {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
@@ -398,7 +395,6 @@ async function handleClaim(reqBody) {
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
-    // End date validation (Active until 23:59:59 Sri Lanka Time of that date)
     if (cfg.event_end_date) {
       const endTimestamp = new Date(`${cfg.event_end_date}T23:59:59+05:30`).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -442,14 +438,13 @@ async function handleClaim(reqBody) {
             { $set: { vip_claimed: true } }
           );
 
-          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
             expire_date: expireDate
           });
 
-          // 1. Winner Message (Personalized)
+          // 1. Winner Message
           const winnerName = updatedUser.first_name || 'User';
           const winMsg = `🏆 <b>Congratulations!</b>\n\n${winnerName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
