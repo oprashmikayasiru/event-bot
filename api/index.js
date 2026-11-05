@@ -175,7 +175,7 @@ bot.start(async (ctx) => {
         { upsert: true }
       );
 
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nUnlock videos to earn points. First <b>${cfg.max_winners} users</b> to reach the target win <b>Free VIP!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
+      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nUnlock videos to earn points. <b>Target එක සම්පූර්ණ කරන පලවෙනි 5 දෙනාට Hot Lanka VIP free හිමිවේ!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
       return ctx.reply(msg, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -457,7 +457,8 @@ async function handleClaim(reqBody) {
           });
 
           // 1. Winner Message
-          const winMsg = `🏆 <b>Congratulations!</b>\n\nYou are one of the first ${cfg.max_winners} winners to reach the target!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
+          const winnerName = updatedUser.first_name || 'User';
+          const winMsg = `🏆 <b>Congratulations!</b>\n\n${winnerName} ඔබ පලමු ජයග්‍රහකයින් ${cfg.max_winners} දෙනා අතරට තේරි ඇත!\n\n🔗 <a href="${invite.invite_link}">Join VIP Channel</a>\n<i>(Valid for 1 person / 24 hours only)</i>`;
           await bot.telegram.sendMessage(userId, winMsg, { parse_mode: 'HTML' });
 
           // 2. Alert to Admin
