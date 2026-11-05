@@ -56,34 +56,32 @@ function getSLDateString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Auto-configure Scoped Commands (Admin vs Users)
+// Auto-configure Scoped Commands
 let commandsConfigured = false;
 async function setupBotCommands() {
   if (commandsConfigured) return;
   try {
-    // Public commands for all users
     await bot.telegram.setMyCommands(
       [
         { command: 'start', description: 'Start bot & register' },
-        { command: 'leaderboard', description: 'View top ranks & points' }
+        { command: 'leaderboard', description: 'View leaderboard' }
       ],
       { scope: { type: 'default' } }
     );
 
-    // Private command menu for Admin only
     if (ADMIN_ID) {
       await bot.telegram.setMyCommands(
         [
           { command: 'start', description: 'Start bot' },
           { command: 'leaderboard', description: 'View leaderboard' },
-          { command: 'admin', description: 'Open Control Dashboard' }
+          { command: 'admin', description: 'Admin Control Panel' }
         ],
         { scope: { type: 'chat', chat_id: Number(ADMIN_ID) } }
       );
     }
     commandsConfigured = true;
   } catch (e) {
-    console.error('Scoped commands setup error:', e.message);
+    console.error('Commands setup error:', e.message);
   }
 }
 
@@ -121,12 +119,16 @@ bot.start(async (ctx) => {
       return ctx.reply(msg, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('📊 Check Leaderboard', 'view_leaderboard')]
+          [Markup.button.callback('📊 Check Leader Board', 'view_leaderboard')]
         ])
       });
     }
 
-    return ctx.reply('👋 Welcome to VIP Event Bot!\n\nUse /leaderboard to check your rank and points.');
+    const botUsername = ctx.botInfo.username;
+    return ctx.reply(`👋 Welcome to VIP Event Bot!\n\nUse <a href="https://t.me/${botUsername}?start=leaderboard">Leader Board</a> to check your rank and points.`, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
   } catch (err) {
     console.error('Start error:', err);
   }
@@ -144,34 +146,40 @@ async function renderLeaderboard(ctx) {
       .limit(5)
       .toArray();
 
+    // Calculate Total Unlocks (Total Posts Claimed)
+    const totalStats = await db.collection('event_users').aggregate([
+      { $group: { _id: null, totalPoints: { $sum: "$points" } } }
+    ]).toArray();
+    const totalUnlocks = totalStats.length > 0 ? totalStats[0].totalPoints : 0;
+
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
-    // Medals matching for all 5 spots (🥇, 🥈, 🥉, 🏅, 🎖️)
     const badges = ['🥇', '🥈', '🥉', '🏅', '🎖️'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
       if (u) {
-        text += `${badges[i]} <code>${maskId(u._id)}</code> ➔ ⭐️ ${u.points} Pts\n`;
+        text += `${badges[i]}  ${maskId(u._id)}  :  ⭐️ ${u.points} Pts\n`;
       } else {
-        text += `${badges[i]} <code>---</code> ➔ ⭐️ 0 Pts\n`;
+        text += `${badges[i]}  ---  :  ⭐️ 0 Pts\n`;
       }
     }
 
     text += `━━━━━━━━━━━━━━━\n`;
     text += `🎁 Claimed: <b>${cfg.claimed_winners} / ${cfg.max_winners}</b>\n`;
+    text += `🔓 Total Unlocks: <b>${totalUnlocks}</b>\n`;
 
     if (userId) {
       const currentUser = await db.collection('event_users').findOne({ _id: userId });
       if (currentUser) {
         const higherCount = await db.collection('event_users').countDocuments({ points: { $gt: currentUser.points } });
-        text += `👤 You: <code>${maskId(userId)}</code> | <b>Rank #${higherCount + 1}</b> (⭐️ ${currentUser.points} Pts)\n`;
+        text += `👤 You: ${maskId(userId)} | Rank #${higherCount + 1} (⭐️ ${currentUser.points} Pts)\n`;
       } else {
         text += `👤 You: <i>Not registered yet</i>\n`;
       }
     }
 
     if (cfg.event_end_date) {
-      text += `⏳ Ends: <code>${cfg.event_end_date}</code>`;
+      text += `⏳ Ends: ${cfg.event_end_date}`;
     }
 
     return text;
@@ -194,13 +202,20 @@ bot.action('view_leaderboard', async (ctx) => {
 
 // --- Admin Dashboard ---
 
-function buildAdminPanel(cfg, totalRegistered) {
+async function buildAdminPanel(db, cfg) {
+  const totalRegistered = await db.collection('event_users').countDocuments();
+  const totalStats = await db.collection('event_users').aggregate([
+    { $group: { _id: null, totalPoints: { $sum: "$points" } } }
+  ]).toArray();
+  const totalUnlocks = totalStats.length > 0 ? totalStats[0].totalPoints : 0;
+
   const text = `⚙️ <b>VIP Event Control Panel</b>\n\n` +
-    `• <b>Registration:</b> ${cfg.reg_enabled ? '🟢 OPEN' : '🔴 CLOSED'}\n` +
-    `• <b>Event End Date:</b> <code>${cfg.event_end_date || 'Not Set'}</code>\n` +
-    `• <b>Target Points:</b> <code>${cfg.target_points}</code>\n` +
-    `• <b>VIP Slots:</b> <code>${cfg.claimed_winners} / ${cfg.max_winners} Claimed</code>\n\n` +
-    `👥 <b>Registered Users:</b> <code>${totalRegistered}</code>`;
+    `• Registration: ${cfg.reg_enabled ? '🟢 OPEN' : '🔴 CLOSED'}\n` +
+    `• Event End Date: ${cfg.event_end_date || 'Not Set'}\n` +
+    `• Target Points: ${cfg.target_points}\n` +
+    `• VIP Slots: ${cfg.claimed_winners} / ${cfg.max_winners} Claimed\n\n` +
+    `👥 Registered Users: ${totalRegistered}\n` +
+    `🔓 Total Posts Unlocked: ${totalUnlocks}`;
 
   const keyboard = Markup.inlineKeyboard([
     [
@@ -222,8 +237,7 @@ bot.command('admin', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return;
   const db = await getDb();
   const cfg = await getEventConfig(db);
-  const total = await db.collection('event_users').countDocuments();
-  const { text, keyboard } = buildAdminPanel(cfg, total);
+  const { text, keyboard } = await buildAdminPanel(db, cfg);
   return ctx.reply(text, { parse_mode: 'HTML', ...keyboard });
 });
 
@@ -237,18 +251,17 @@ bot.action('toggle_reg', async (ctx) => {
   );
   await ctx.answerCbQuery('Updated!');
   const newCfg = await getEventConfig(db);
-  const total = await db.collection('event_users').countDocuments();
-  const { text, keyboard } = buildAdminPanel(newCfg, total);
+  const { text, keyboard } = await buildAdminPanel(db, newCfg);
   return ctx.editMessageText(text, { parse_mode: 'HTML', ...keyboard });
 });
 
-// Duration Selector with Sri Lanka Time Calculation
+// Quick Duration Selector Buttons
 bot.action('admin_pick_date', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   const db = await getDb();
   const cfg = await getEventConfig(db);
   await ctx.answerCbQuery();
-  return ctx.reply(`⏱️ <b>Select Event Duration:</b>\n\n📌 <b>Current End Date:</b> <code>${cfg.event_end_date || 'Not Set'}</code>`, {
+  return ctx.reply(`⏱️ <b>Select Event Duration:</b>\n\n📌 <b>Current End Date:</b> ${cfg.event_end_date || 'Not Set'}`, {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
       [
@@ -259,19 +272,9 @@ bot.action('admin_pick_date', async (ctx) => {
         Markup.button.callback('+30 Days', 'set_days_30'),
         Markup.button.callback('❌ Clear Date', 'set_days_clear')
       ],
-      [
-        Markup.button.callback('ℹ️ Check Current End Date', 'check_current_date')
-      ],
       [Markup.button.callback('🔙 Back to Panel', 'admin_back_to_panel')]
     ])
   });
-});
-
-bot.action('check_current_date', async (ctx) => {
-  if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
-  const db = await getDb();
-  const cfg = await getEventConfig(db);
-  return ctx.answerCbQuery(`End Date: ${cfg.event_end_date || 'Not Set'}`, { show_alert: true });
 });
 
 async function applyDays(ctx, days) {
@@ -286,7 +289,7 @@ async function applyDays(ctx, days) {
     { $set: { event_end_date: dateStr } }
   );
   await ctx.answerCbQuery('Date Updated!');
-  return ctx.reply(`✅ Event End Date set to: <code>${dateStr || 'Cleared'}</code> (Sri Lanka Time)`, { parse_mode: 'HTML' });
+  return ctx.reply(`✅ Event End Date set to: <b>${dateStr || 'Cleared'}</b>`, { parse_mode: 'HTML' });
 }
 
 bot.action('set_days_7', (ctx) => applyDays(ctx, 7));
@@ -299,8 +302,7 @@ bot.action('admin_back_to_panel', async (ctx) => {
   await ctx.answerCbQuery();
   const db = await getDb();
   const cfg = await getEventConfig(db);
-  const total = await db.collection('event_users').countDocuments();
-  const { text, keyboard } = buildAdminPanel(cfg, total);
+  const { text, keyboard } = await buildAdminPanel(db, cfg);
   return ctx.reply(text, { parse_mode: 'HTML', ...keyboard });
 });
 
@@ -386,7 +388,6 @@ async function handleClaim(reqBody) {
     const cfg = await getEventConfig(db);
 
     if (cfg.event_end_date) {
-      // Compare in Sri Lanka timestamp
       const endTimestamp = new Date(cfg.event_end_date.replace(' ', 'T') + ':00+05:30').getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
         return { ok: false, reason: 'event_ended' };
@@ -451,7 +452,6 @@ async function handleClaim(reqBody) {
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
-    // Setup Scoped Commands on background execution
     setupBotCommands().catch(() => {});
 
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
