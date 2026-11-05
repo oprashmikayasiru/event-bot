@@ -26,7 +26,7 @@ async function getEventConfig(db) {
     cfg = {
       _id: 'main_event',
       reg_enabled: true,
-      event_end_date: null, // Format: YYYY-MM-DD HH:mm
+      event_end_date: null,
       target_points: 30,
       max_winners: 5,
       claimed_winners: 0
@@ -34,6 +34,12 @@ async function getEventConfig(db) {
     await col.insertOne(cfg);
   }
   return cfg;
+}
+
+function maskId(id) {
+  const str = String(id);
+  if (str.length <= 4) return '***';
+  return `${str.slice(0, 3)}***${str.slice(-3)}`;
 }
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -51,7 +57,7 @@ bot.start(async (ctx) => {
 
     if (payload === 'JOIN_EVENT') {
       if (!cfg.reg_enabled) {
-        return ctx.reply('⚠️ Registration Closed!');
+        return ctx.reply('⚠️ Registration is currently closed!');
       }
 
       await db.collection('event_users').updateOne(
@@ -68,7 +74,7 @@ bot.start(async (ctx) => {
         { upsert: true }
       );
 
-      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points ගන්න. මුලින්ම Target එක ගහන <b>පළමු ${cfg.max_winners} දෙනාට VIP Free!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
+      const msg = `🎉 <b>VIP Challenge Registered!</b>\n\nVideos unlock කරලා Points එකතු කරගන්න. මුලින්ම Target එක ගහන <b>පළමු ${cfg.max_winners} දෙනාට VIP Free!</b>\n\n🎯 Target: <b>${cfg.target_points} Points</b>`;
       return ctx.reply(msg, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -77,7 +83,7 @@ bot.start(async (ctx) => {
       });
     }
 
-    return ctx.reply('👋 Welcome to VIP Event Bot!\n\nUse /leaderboard to check top ranks.');
+    return ctx.reply('👋 Welcome to VIP Event Bot!\n\nUse /leaderboard to check your rank and points.');
   } catch (err) {
     console.error('Start error:', err);
   }
@@ -96,32 +102,32 @@ async function renderLeaderboard(ctx) {
       .toArray();
 
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
-    const ranks = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    const badges = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
       if (u) {
-        text += `${ranks[i]} Rank ${i + 1} : ⭐️ ${u.points} Pts\n`;
+        text += `${badges[i]}  <code>${maskId(u._id)}</code>  ➔  ⭐️ <b>${u.points} Pts</b>\n\n`;
       } else {
-        text += `${ranks[i]} Rank ${i + 1} : ⭐️ 0 Pts\n`;
+        text += `${badges[i]}  <code>---</code>  ➔  ⭐️ 0 Pts\n\n`;
       }
     }
 
-    text += `━━━━━━━━━━━━\n`;
+    text += `━━━━━━━━━━━━━━━\n`;
     text += `🎁 Claimed: <b>${cfg.claimed_winners} / ${cfg.max_winners}</b>\n`;
 
     if (userId) {
       const currentUser = await db.collection('event_users').findOne({ _id: userId });
       if (currentUser) {
         const higherCount = await db.collection('event_users').countDocuments({ points: { $gt: currentUser.points } });
-        text += `👤 You: <b>Rank #${higherCount + 1}</b> (${currentUser.points} Pts)\n`;
+        text += `👤 You: <code>${maskId(userId)}</code> | <b>Rank #${higherCount + 1}</b> (⭐️ ${currentUser.points} Pts)\n`;
       } else {
-        text += `👤 You: Not registered yet\n`;
+        text += `👤 You: <i>Not registered yet</i>\n`;
       }
     }
 
     if (cfg.event_end_date) {
-      text += `⏳ Ends: <code>${cfg.event_end_date}</code>`;
+      text += `\n⏳ <b>Event Ends:</b> <code>${cfg.event_end_date}</code>`;
     }
 
     return text;
@@ -142,7 +148,7 @@ bot.action('view_leaderboard', async (ctx) => {
   return ctx.reply(text, { parse_mode: 'HTML' });
 });
 
-// --- Admin Dashboard Handlers ---
+// --- Admin Dashboard ---
 
 function buildAdminPanel(cfg, totalRegistered) {
   const text = `⚙️ <b>VIP Event Control Panel</b>\n\n` +
@@ -157,7 +163,7 @@ function buildAdminPanel(cfg, totalRegistered) {
       Markup.button.callback(`Reg: ${cfg.reg_enabled ? '🟢 ON' : '🔴 OFF'}`, 'toggle_reg')
     ],
     [
-      Markup.button.callback('⏱️ Set End Date', 'admin_set_date'),
+      Markup.button.callback('📅 Set End Date', 'admin_pick_date'),
       Markup.button.callback('🎯 Set Target', 'admin_set_target')
     ],
     [
@@ -192,15 +198,54 @@ bot.action('toggle_reg', async (ctx) => {
   return ctx.editMessageText(text, { parse_mode: 'HTML', ...keyboard });
 });
 
-bot.action('admin_set_date', async (ctx) => {
+// Quick Date Selector Buttons
+bot.action('admin_pick_date', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
+  await ctx.answerCbQuery();
+  return ctx.reply('⏱️ <b>Select Event Duration:</b>', {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [
+        Markup.button.callback('+7 Days', 'set_days_7'),
+        Markup.button.callback('+14 Days', 'set_days_14')
+      ],
+      [
+        Markup.button.callback('+30 Days', 'set_days_30'),
+        Markup.button.callback('❌ Clear Date', 'set_days_clear')
+      ],
+      [Markup.button.callback('🔙 Back to Panel', 'admin_back_to_panel')]
+    ])
+  });
+});
+
+async function applyDays(ctx, days) {
   const db = await getDb();
+  let dateStr = null;
+  if (days > 0) {
+    const target = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    dateStr = target.toISOString().replace('T', ' ').slice(0, 16);
+  }
   await db.collection('event_config').updateOne(
     { _id: 'main_event' },
-    { $set: { admin_state: 'awaiting_end_date' } }
+    { $set: { event_end_date: dateStr } }
   );
+  await ctx.answerCbQuery('Date Updated!');
+  return ctx.reply(`✅ Event End Date set to: <code>${dateStr || 'Cleared'}</code>`, { parse_mode: 'HTML' });
+}
+
+bot.action('set_days_7', (ctx) => applyDays(ctx, 7));
+bot.action('set_days_14', (ctx) => applyDays(ctx, 14));
+bot.action('set_days_30', (ctx) => applyDays(ctx, 30));
+bot.action('set_days_clear', (ctx) => applyDays(ctx, 0));
+
+bot.action('admin_back_to_panel', async (ctx) => {
+  if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   await ctx.answerCbQuery();
-  return ctx.reply('Send End Date (Format: YYYY-MM-DD HH:mm)\nExample: 2026-12-06 23:59\n\nSend /cancel to abort.');
+  const db = await getDb();
+  const cfg = await getEventConfig(db);
+  const total = await db.collection('event_users').countDocuments();
+  const { text, keyboard } = buildAdminPanel(cfg, total);
+  return ctx.reply(text, { parse_mode: 'HTML', ...keyboard });
 });
 
 bot.action('admin_set_target', async (ctx) => {
@@ -263,15 +308,6 @@ bot.on('text', async (ctx) => {
   const db = await getDb();
   const cfg = await getEventConfig(db);
 
-  if (cfg.admin_state === 'awaiting_end_date') {
-    const val = ctx.message.text.trim();
-    await db.collection('event_config').updateOne(
-      { _id: 'main_event' },
-      { $set: { event_end_date: val }, $unset: { admin_state: '' } }
-    );
-    return ctx.reply(`✅ Event End Date set to: ${val}`);
-  }
-
   if (cfg.admin_state === 'awaiting_target') {
     const pts = parseInt(ctx.message.text.trim(), 10);
     if (isNaN(pts) || pts <= 0) return ctx.reply('❌ Invalid number.');
@@ -283,7 +319,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// --- Claim Verification Logic ---
+// --- Claim Handler (From File Bot) ---
 
 async function handleClaim(reqBody) {
   try {
@@ -293,7 +329,6 @@ async function handleClaim(reqBody) {
     const db = await getDb();
     const cfg = await getEventConfig(db);
 
-    // End date validation
     if (cfg.event_end_date) {
       const endTimestamp = new Date(cfg.event_end_date).getTime();
       if (!isNaN(endTimestamp) && Date.now() > endTimestamp) {
@@ -301,16 +336,13 @@ async function handleClaim(reqBody) {
       }
     }
 
-    // Registered user check
     const user = await db.collection('event_users').findOne({ _id: Number(userId) });
     if (!user) return { ok: false, reason: 'not_registered' };
 
-    // Anti-cheat: Check if fileKey already unlocked
     if (user.claimed_files && user.claimed_files.includes(String(fileKey))) {
       return { ok: false, reason: 'already_claimed' };
     }
 
-    // Atomic update points & claimed_files
     const updateRes = await db.collection('event_users').findOneAndUpdate(
       { _id: Number(userId), claimed_files: { $ne: String(fileKey) } },
       { 
@@ -323,7 +355,6 @@ async function handleClaim(reqBody) {
     const updatedUser = updateRes.value || updateRes;
     if (!updatedUser) return { ok: false };
 
-    // Target reached & VIP generation check
     if (updatedUser.points >= cfg.target_points && !updatedUser.vip_claimed) {
       if (cfg.claimed_winners < cfg.max_winners) {
         const confUpdate = await db.collection('event_config').findOneAndUpdate(
@@ -338,7 +369,6 @@ async function handleClaim(reqBody) {
             { $set: { vip_claimed: true } }
           );
 
-          // 24h single-use VIP link
           const expireDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
           const invite = await bot.telegram.createChatInviteLink(VIP_CHANNEL_ID, {
             member_limit: 1,
@@ -360,7 +390,7 @@ async function handleClaim(reqBody) {
   }
 }
 
-// --- Vercel Serverless Entry Point ---
+// --- Vercel Serverless Function ---
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
