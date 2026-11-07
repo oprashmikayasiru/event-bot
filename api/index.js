@@ -138,18 +138,24 @@ async function renderLeaderboardText(ctx) {
       .limit(5)
       .toArray();
 
+    // 1. Header (Emoji වෙනම උඩින් තබා ගනී)
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
-    const badges = ['🥇', '🥈', '🥉', '❹', '❺'];
+
+    // 2. Monospace block එක ඇතුළේ ලස්සනට Format කිරීම
+    text += `<pre>`;
+    const rankLabels = ['1.', '2.', '3.', '4.', '5.'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
-      if (u) {
-        text += `${badges[i]} ${maskId(u._id)} : ${u.points} XP\n`;
-      } else {
-        text += `${badges[i]} --- : 0 XP\n`;
-      }
-    }
+      const rank = rankLabels[i];
+      const idStr = u ? maskId(u._id) : '---        ';
+      const pts = u ? String(u.points).padStart(3, ' ') : '  0';
 
+      text += `${rank} ${idStr} : ${pts} XP\n`;
+    }
+    text += `</pre>`;
+
+    // 3. යට විස්තර ටික
     text += `━━━━━━━━━━━━━━━\n`;
     text += `🎁 Claimed: <b>${cfg.claimed_winners} / ${cfg.max_winners}</b>\n`;
 
