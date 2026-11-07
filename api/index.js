@@ -9,19 +9,34 @@ const VIP_CHANNEL_ID = String(process.env.VIP_CHANNEL_ID || '-1004316350899').tr
 const ADMIN_ID = String(process.env.ADMIN_ID || '5411921025').trim();
 const VERCEL_URL = 'https://event-bot-sigma.vercel.app';
 
+// --- ROBUST MONGODB CONNECTION POOL (AUTO-RECONNECT ON FREEZE) ---
 let cachedClient = null;
+let cachedDb = null;
+
 async function getDb() {
-  if (!cachedClient) {
-    cachedClient = new MongoClient(MONGODB_URI, {
-      maxPoolSize: 10,
-      minPoolSize: 1,
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
-      serverSelectionTimeoutMS: 5000
-    });
-    await cachedClient.connect();
+  if (cachedClient && cachedDb) {
+    try {
+      await cachedClient.db('admin').command({ ping: 1 });
+      return cachedDb;
+    } catch (e) {
+      console.warn('Stale MongoDB connection detected, reconnecting...');
+      cachedClient = null;
+      cachedDb = null;
+    }
   }
-  return cachedClient.db('vip_event_bot');
+
+  const client = new MongoClient(MONGODB_URI, {
+    maxPoolSize: 10,
+    minPoolSize: 1,
+    connectTimeoutMS: 5000,
+    socketTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 5000
+  });
+
+  await client.connect();
+  cachedClient = client;
+  cachedDb = client.db('vip_event_bot');
+  return cachedDb;
 }
 
 // Config Cache Helper
@@ -70,13 +85,17 @@ function getSLDateOnlyString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Auto-Healing Webhook & Scoped Commands Setup
-let systemInitialized = false;
+// --- AUTO-HEALING WEBHOOK & COMMANDS WATCHDOG ---
+let lastWebhookCheck = 0;
 async function initSystem() {
-  if (systemInitialized) return;
+  const now = Date.now();
+  if (now - lastWebhookCheck < 60000) return; // Run check at most once per minute
+  lastWebhookCheck = now;
+
   try {
     const info = await bot.telegram.getWebhookInfo();
     if (!info.url || info.url !== VERCEL_URL) {
+      console.log('Restoring dropped webhook...');
       await bot.telegram.setWebhook(VERCEL_URL, {
         allowed_updates: ['message', 'callback_query', 'chat_join_request', 'chat_member']
       });
@@ -100,9 +119,8 @@ async function initSystem() {
         { scope: { type: 'chat', chat_id: Number(ADMIN_ID) } }
       );
     }
-    systemInitialized = true;
   } catch (e) {
-    console.error('Init error:', e.message);
+    console.error('Watchdog init error:', e.message);
   }
 }
 
@@ -605,7 +623,7 @@ async function evaluateWinner(db, cfg, user) {
   }
 }
 
-// --- Claim Handler (From File Bot - Asynchronous Non-Blocking) ---
+// --- Claim Handler (From File Bot - Safe Synchronous Completion within Serverless Invocation) ---
 
 async function processClaimInBackground(userId, fileKey) {
   try {
@@ -833,7 +851,6 @@ bot.action('admin_reset_execute', async (ctx) => {
   if (!ctx.from || String(ctx.from.id) !== ADMIN_ID) return ctx.answerCbQuery('Unauthorized');
   const db = await getDb();
   
-  // Wipe all 3 collections simultaneously
   await Promise.all([
     db.collection('event_users').deleteMany({}),
     db.collection('invitees').deleteMany({}),
@@ -870,21 +887,20 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// --- Vercel Serverless Entry Point ---
+// --- VERCEL SERVERLESS ENTRY POINT ---
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
-    // 1. Instant Fire-and-Forget Response for File Bot
+    // 1. Synchronously process File Bot claims before terminating serverless function
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
-      res.status(200).json({ ok: true });
       const { userId, fileKey } = req.body || {};
       if (userId && fileKey) {
-        processClaimInBackground(userId, fileKey).catch((e) => console.error('BG Claim Error:', e));
+        await processClaimInBackground(userId, fileKey).catch((e) => console.error('Claim Error:', e));
       }
-      return;
+      return res.status(200).json({ ok: true });
     }
 
-    // 2. Telegram Webhook Updates
+    // 2. Telegram Webhook Updates + Auto-healing Watchdog Check
     initSystem().catch(() => {});
     try {
       let body = req.body;
@@ -900,7 +916,7 @@ module.exports = async (req, res) => {
     return res.status(200).send('OK');
   }
 
-  // GET request (Health Check)
+  // GET request (Health Check & Force Self-Healing)
   await initSystem().catch(() => {});
   return res.status(200).send('Hot Lanka Event Bot is Running and Webhook is Active!');
 };
