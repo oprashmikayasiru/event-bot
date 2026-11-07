@@ -204,9 +204,11 @@ bot.start(async (ctx) => {
     return ctx.reply(welcomeReturning, {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔗 Get Invite Link', 'get_invite_link')],
-        [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
-      ])
+  [
+    Markup.button.callback('🔗 Get Invite Link', 'get_invite_link'),
+    Markup.button.callback('🏆 Leader Board', 'view_leaderboard')
+  ]
+])
     });
   } catch (err) {
     console.error('Start error:', err);
