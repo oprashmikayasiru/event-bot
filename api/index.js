@@ -216,7 +216,7 @@ bot.start(async (ctx) => {
     }
 
     const welcomeReturning = `👋 Welcome back <b>${fName}</b> to <b>Hot Lanka Event Bot</b>!\n\n` +
-      `⚡️ <b>Rates:</b> 1 Video = 1 XP | 1 Referral = 20 XP\n` +
+      `⚡️<b>1 Video = 1 XP</b> 🤝 <b>1 Referral = 20 XP</b>\n` +
       `🎯 <b>Target:</b> <b>${cfg.target_points} XP</b>`;
 
     return ctx.reply(welcomeReturning, {
