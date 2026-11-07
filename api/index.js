@@ -184,8 +184,8 @@ bot.start(async (ctx) => {
         `🎁 <b>VIP Giveaway Challenge!</b>\n` +
         `Videos unlock කර හෝ යහළුවන් Invite කර XP ලබාගන්න. Target එක සම්පූර්ණ කරන <b>මුල් ${cfg.max_winners} දෙනාට Hot Lanka VIP එක Free</b> හිමිවේ!\n\n` +
         `⚡️ <b>Rates:</b>\n` +
-        `▫️ 1 Video Unlock = <b>1 XP</b>\n` +
-        `▫️ 1 Verified Referral = <b>20 XP</b>\n` +
+        `• 1 Video Unlock = <b>1 XP</b>\n` +
+        `• 1 Verified Referral = <b>20 XP</b>\n` +
         `🎯 <b>Target:</b> <b>${cfg.target_points} XP</b>\n\n` +
         `Challenge එකට එකතු වෙන්න පහත <b>Join Event</b> බටන් එක ක්ලික් කරන්න:`;
 
@@ -204,9 +204,9 @@ bot.start(async (ctx) => {
     return ctx.reply(welcomeReturning, {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-  [Markup.button.callback('🔗 Get Invite Link', 'get_invite_link')],
-  [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
-  ])
+        [Markup.button.callback('🔗 Get Invite Link', 'get_invite_link')],
+        [Markup.button.callback('🏆 Leader Board', 'view_leaderboard')]
+      ])
     });
   } catch (err) {
     console.error('Start error:', err);
