@@ -143,7 +143,7 @@ async function renderLeaderboardText(ctx) {
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
 
     // සියලුම Badges Emoji පළලින්ම සමාන කර ඇති නිසා කෙලින්ම පිහිටයි
-    const badges = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    const badges = ['🥇', '🥈', '🥉', ' ❹  ', ' ❺  '];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
