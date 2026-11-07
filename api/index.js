@@ -126,6 +126,8 @@ async function initSystem() {
 
 // --- Leaderboard View Logic ---
 
+// --- Leaderboard View Logic (Clean Normal Text Alignment) ---
+
 async function renderLeaderboardText(ctx) {
   try {
     const db = await getDb();
@@ -138,24 +140,20 @@ async function renderLeaderboardText(ctx) {
       .limit(5)
       .toArray();
 
-    // 1. Header (Emoji වෙනම උඩින් තබා ගනී)
     let text = `🏆 <b>VIP RACE (TOP 5)</b>\n\n`;
 
-    // 2. Monospace block එක ඇතුළේ ලස්සනට Format කිරීම
-    text += `<pre>`;
-    const rankLabels = ['1.', '2.', '3.', '4.', '5.'];
+    // සියලුම Badges Emoji පළලින්ම සමාන කර ඇති නිසා කෙලින්ම පිහිටයි
+    const badges = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
 
     for (let i = 0; i < 5; i++) {
       const u = topUsers[i];
-      const rank = rankLabels[i];
+      const badge = badges[i];
       const idStr = u ? maskId(u._id) : '---        ';
-      const pts = u ? String(u.points).padStart(3, ' ') : '  0';
+      const pts = u ? u.points : 0;
 
-      text += `${rank} ${idStr} : ${pts} XP\n`;
+      text += `${badge} ${idStr} : ${pts} XP\n`;
     }
-    text += `</pre>`;
 
-    // 3. යට විස්තර ටික
     text += `━━━━━━━━━━━━━━━\n`;
     text += `🎁 Claimed: <b>${cfg.claimed_winners} / ${cfg.max_winners}</b>\n`;
 
