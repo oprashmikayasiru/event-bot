@@ -259,7 +259,7 @@ bot.action('action_join_event', async (ctx) => {
       { upsert: true }
     );
 
-    await ctx.answerCbQuery('සාර්ථකව ලියාපදිංචි විය!');
+    await ctx.answerCbQuery('Successfully registered!');
 
     const msg = `🎉 <b>VIP Challenge Registered!</b>\n\n` +
       `ඔබ සාර්ථකව Event එකට ලියාපදිංචි විය! දැන් videos unlock කර හෝ මිතුරන් එකතු කර <b>XP</b> වැඩි කරගන්න.\n\n` +
