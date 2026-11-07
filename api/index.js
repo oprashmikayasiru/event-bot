@@ -5,14 +5,17 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '9219700583:AAGSAXsd3g34KHI0fTYoJzCbf
 const MONGODB_URI = process.env.MONGODB_URI;
 const VIP_CHANNEL_ID = process.env.VIP_CHANNEL_ID || '-1004316350899';
 const ADMIN_ID = String(process.env.ADMIN_ID || '5411921025').trim();
+const VERCEL_URL = 'https://event-bot-sigma.vercel.app';
 
 let cachedClient = null;
 async function getDb() {
   if (!cachedClient) {
     cachedClient = new MongoClient(MONGODB_URI, {
-      maxPoolSize: 10,
+      maxPoolSize: 5,
       minPoolSize: 1,
-      maxIdleTimeMS: 60000
+      connectTimeoutMS: 5000,
+      socketTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 5000
     });
     await cachedClient.connect();
   }
@@ -53,10 +56,18 @@ function getSLDateOnlyString(futureTimestamp) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-let commandsConfigured = false;
-async function setupBotCommands() {
-  if (commandsConfigured) return;
+// Ensure Webhook & Commands are always active
+let systemInitialized = false;
+async function initSystem() {
+  if (systemInitialized) return;
   try {
+    // 1. Auto-healing Webhook check
+    const info = await bot.telegram.getWebhookInfo();
+    if (!info.url || info.url !== VERCEL_URL) {
+      await bot.telegram.setWebhook(VERCEL_URL, { drop_pending_updates: false });
+    }
+
+    // 2. Scoped Commands
     await bot.telegram.setMyCommands(
       [
         { command: 'start', description: 'Start bot & instructions' },
@@ -75,9 +86,9 @@ async function setupBotCommands() {
         { scope: { type: 'chat', chat_id: Number(ADMIN_ID) } }
       );
     }
-    commandsConfigured = true;
+    systemInitialized = true;
   } catch (e) {
-    console.error('Commands setup error:', e.message);
+    console.error('Init error:', e.message);
   }
 }
 
@@ -178,7 +189,6 @@ bot.start(async (ctx) => {
   }
 });
 
-// Explicit Join Action Button
 bot.action('action_join_event', async (ctx) => {
   if (!ctx.from) return;
   const userId = ctx.from.id;
@@ -516,7 +526,8 @@ async function handleClaim(reqBody) {
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
-    setupBotCommands().catch(() => {});
+    // Background Auto-healing
+    initSystem().catch(() => {});
 
     if (req.url.includes('/api/claim') || (req.body && req.body.fileKey)) {
       const result = await handleClaim(req.body);
@@ -528,10 +539,12 @@ module.exports = async (req, res) => {
         await bot.handleUpdate(req.body);
       }
     } catch (err) {
-      console.error('Webhook error:', err);
+      console.error('Webhook handle error:', err);
     }
     return res.status(200).send('OK');
   }
 
-  return res.status(200).send('HL Event Bot is Running!');
+  // GET request (Visiting URL in browser)
+  await initSystem().catch(() => {});
+  return res.status(200).send('HL Event Bot is Running and Webhook is Active!');
 };
